@@ -81,7 +81,7 @@ blastn <- function(fas, db, out) {
 }
 
 # we launch the search for the current batch of species pairs with the required number of CPUs ---------------------------------------------
-sel[, mcMap(
+sel[, mcMap( #function from package parallel. To run job in parallel on a slurm server
     f = blastn,
     fas = fas,
     db = db,
