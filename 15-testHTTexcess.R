@@ -1,51 +1,341 @@
-
-
 ## %######################################################%##
 #                                                          #
-####       This stage permutates species to test        ####
-####       whether some clades have more htt than       ####
-####          expected by chance. This can be           ####
-####          run at any point after stage 12.          ####
+####          This script shuffles species to           ####
+####       generate random species pairs involved       ####
+####            in transfers, for each super            ####
+####       family, avoiding generating "illegal         ####
+####   pairs" for which no HTT can be infered, due to   ####
+####         our requirement that species must          ####
+####             be divergent by 2*120 My.              ####
 #                                                          #
 ## %######################################################%##
 
-# The principle is to replace a species by a random one among the 307 species
-# and compute the number of transfers that involves each species (or rather, each taxon)
-# Hence, the distribution of htt event per species is not changed in a sense that 
-# if species 1 was involved in 10 events and species 2 had 20, swapping these species
-# will not affect the numbers. There would sill be 10 transfers for one species and
-# 20 for another.
+require(ape)
+require(data.table)
+require(dplyr)
+library(stringr)
+library(parallel)
+library(stringi)
+require(RColorBrewer)
+library(matrixStats)
 
-# as several species are found for each clade of a hit group, we only
-# consider the pair of species involved in the best hit (see paper)
+## Variables to set :
+nCPUs <- 20
+
+#Pick one, comment the others
+included <- "all"
+#included <- "Chordata"
+#included <- "Insects"
+
+
+path = "~/Project/"
+setwd(path) 
 
 source("HTvFunctions.R")
-tree <- read.tree("additional_files/timetree.nwk")
 
-# we import data file provided with the paper, which is a table of hits representing HTT
-retainedHits <- fread("supplementary-data4-retained_hits")
+# a second optional argument is a node number to permute only species within this clade. 
+# Defaults to the basal node to permute all species
+tree <- read.tree("datasetTree.nwk")
+node <- which.max(node.depth(tree))
+
+# a third optional argument is the number of replicates we want, defaults to 1000
+n <-1000
+
+# we compute the number of legal permutation we need per job launched in parallel
+maxn <- ceiling(n / nCPUs)
+
+#######################################
+
+###  Metadata ##
+meta <- fread("metadata.tbl")
+meta <- mutate(meta, species = gsub(" ", "_", species))
+meta$group <- str_to_title(meta$group)
+meta[, sp :=  chmatch(species, tree$tip.label)]
+
+#Make groups at same taxonomical scale as other studies
+#N.B. We call this column "order" because it corresponds to taxo order for insects (but not for others)
+meta = mutate(meta, order = 
+    ifelse(group == "Archosauria" & habitat == "aquatic", "Crocodylidae",
+    ifelse(group == "Archosauria" & habitat == "terrestrial", "Aves",
+    ifelse(group == "Chelicerata" & habitat == "terrestrial", "Arachnida",
+    ifelse(species=="Nymphon_striatum", "Pycnogonida",
+    ifelse(group == "Chelicerata" & habitat == "aquatic" & species!="Nymphon_striatum", "Limulidae",
+    ifelse(dbBusco=="lepidoptera_odb10", "Lepidoptera",
+    ifelse(group=="Amphiesmenoptera" & dbBusco=="endopterygota_odb10", "Trichoptera",
+    ifelse(group %in% c("Syrphoidea", "Nematocera", "Ephydroidea"), "Diptera",
+    ifelse(species %in% c("Baetis_rhodani", "Ephemera_danica", "Cloeon_dipterum"), "Ephemeroptera",
+    ifelse(species %in% c("Pantala_flavescens", "Rhinocypha_anisoptera", "Calopteryx_splendens", "Ladona_fulva", "Ischnura_elegans"), "Odonata",
+    ifelse(species %in% c("Clitarchus_hookeri", "Timema_cristinae"), "Phasmatodea",
+    ifelse(species %in% c("Vandiemenella_viatica", "Gryllus_bimaculatus", "Laupala_kohalensis", "Apteronemobius_asahinai"), "Orthoptera",
+    ifelse(species %in% c("Coptotermes_formosanus", "Cryptotermes_secundus", "Blattella_germanica"), "Blattodea",
+    ifelse(species=="Anisolabis_maritima", "Dermaptera", group)))))))))))))))
+
+#######################################
+
+# STEP ONE, we select the hits and delineate the scope of permutations -------------------------------------------
+
+# we import the hit representing htt
+retainedHits <- fread("HTThitsAssessed_perClade_retained")
+
+#If not all species are included, get the subset of meta of interest
+if(included=="Chordata"){
+    meta <- meta[phylum=="Chordata",]
+} else if(included=="Insects") {
+    meta <- meta[phylum=="Arthropoda" & !group %in% c("Chelicerata", "Crustacea"),]
+}
+
+#The following will be a subset only if meta is a subset:
+retainedHits <- filter(retainedHits, species.1 %in% meta$species & species.2 %in%  meta$species) %>% data.table
+tree <- keep.tip(tree, tip = meta$sp) 
+node <- which.max(node.depth(tree))
+
+#Update number sp in case changed when took subset of tree
+meta[, sp :=  chmatch(species, tree$tip.label)]
+
+setorder(meta, sp)
+taxon <- meta$order
+
+# as several species are involved in a hit group even though this would just represent one transfer, 
+# we only retain the two species for the best hit (best pID) per hit group. We also replace their 
+# names with tip numbers of the tree, as integer numbers speed things up and save memory considerably
+
+# we put the best hits on top 
+setorder(retainedHits, -pID)
+
+# we extract the ones we want (note that we only consider "independent" transfers)
+# and we replace species names with tip numbers at the same time
+HTThits <- retainedHits[independent == T, .(
+    sp1 = chmatch(species.1[1], tree$tip.label),
+    sp2 = chmatch(species.2[1], tree$tip.label),
+    repl = 0L
+    # repl is a replicate number (= 0 for original, non-permuted species)
+), by = .(hitGroup, superfamily)]
 
 
+#I regroup some superfamilies
+HTThits = mutate(HTThits, superF = ifelse(str_detect(superfamily, "TcMar"),"DNA/Mariner",
+    ifelse(str_detect(superfamily, "hAT"), "DNA/hAT",
+    ifelse(str_detect(superfamily, "Sola"), "DNA/Sola",
+    ifelse(str_detect(superfamily, "CMC"), "DNA/CMC",
+    ifelse(str_detect(superfamily, "Crypton"), "DNA/Crypton",
+    ifelse(str_detect(superfamily, "MULE"), "DNA/MULE",
+    ifelse(str_detect(superfamily, "PIF"), "DNA/PIF-Harbinger",
+    ifelse(str_detect(superfamily, "Ginger"), "DNA/Ginger",
+    ifelse(str_detect(superfamily, "LTR/ERV"), "LTR/ERV",
+    ifelse(str_detect(superfamily, "LINE/RTE") | str_detect(superfamily, "Proto2"), "LINE/RTE",
+    ifelse(str_detect(superfamily, "LINE/L1"), "LINE/L1",
+    ifelse(str_detect(superfamily, "LINE/R2") | str_detect(superfamily, "LINE/CRE") | str_detect(superfamily, "R4"), "LINE/R2",
+    ifelse(str_detect(superfamily, "LINE/L2") | str_detect(superfamily, "LINE/CR1"), "LINE/Jockey",
+    ifelse(str_detect(superfamily, "LINE/R1"), "LINE/I",
+    superfamily
+)))))))))))))))
 
-# STEP ONE, permutation of species --------------------------------------------------------------------------------
-# we launch the dedicated script to perform the permutations on 20 CPUs
-system('sbatch --mail-type=BEGIN,END,FAIL --cpus-per-task=20 --mem=20G --wrap="Rscript permutateSpeciesInHits.R 20"')
+
+# we determine the scope of permutations. Ideally, we permute species involved in htt within a TE super family, 
+# but some contain too few HTT for this to be meaningful, 
+# and others contain too many, which makes impossible to obtain only "legal" permutations
+# to make our choices, we compute the number of independent transfers per super family, 
+nTr <- HTThits[, .N, by = superF]
+
+# we add a column to denote the TE class, as we pool super families 
+# that are involved in less than 20 transfers within classes
+nTr[, class := ifelse(str_detect(superF, "DNA/") | superF=="RC/Helitron",
+    "DNA",
+    "RNA"
+)]
+
+nTr[, combined := ifelse(test = N < 20, 
+                         yes = paste("other", class, sep = " "),  #for pooled superfamilies, we use "other" + the TE class
+                         no = superF)]
+
+# we replace names of underrepresented super families with the combined names
+HTThits[, superfamily2 := nTr[chmatch(HTThits$superF, superF), combined]]
+
+# we recompute the numbers of transfers with the pooled super families
+nTr <- nTr[, .(N = sum(N)), by = combined]
+
+# as there may be too many hits per superfamily to obtain only "legal" permutations, 
+# we will split certain super families in batches of hits (when they encompass more than 120 transfers)
+# We add a column for the number of time a superfamily has been seen in transfers
+HTThits[, occ := occurrences(superF)]
+
+# we compute the max number of transfers we allow per superfamily batch
+nTr[, maxi := N / ceiling(N / 121)]
+
+# which we transfer to the hits table
+#HTThits[, maxi := nTr[match(HTThits$superF, combined), maxi]]
+HTThits[, maxi := nTr[match(HTThits$superfamily2, combined), maxi]]
+
+# for mariners, we need even smaller batches of ≤ 61 transfers 
+# (for some reason, it is harder to obtain legal permutations in these TEs)
+HTThits[superfamily2 == "DNA/Mariner", maxi := 61L]
+
+#I do the same thing with DNA/hAT since they are about as many as Mariner
+HTThits[superfamily2 == "DNA/hAT", maxi := 61L]
+
+HTThits[, batch := ceiling(occ / maxi)]
+
+# we split the hits by superfamily and batch
+# a "hit" will be a pair of species associated with a permutation number
+hitList <- split(x = HTThits[, .(sp1, sp2, repl)],
+                 f = list(HTThits$superfamily2, HTThits$batch),
+                 drop = T) 
+
+# we get the total number of species
+nSpecies <- length(tree$tip.label)
+
+# this matrix will contain the permuted "replacement species" during the work, one set of permuted species per column.
+newsp <- matrix(rep(1:nSpecies, 10^5), ncol = 10^5)
+# Note that we anticipate 10^5 permutations per batch, although we keep much fewer. 
+# This is because many permutations may be "illegal".
+# The row indices of this matrix = the original species (integer ids)
+
+# we determine which simulated transfers (those with permuted species) are "legal"-------------------------------
+# we create the matrix of divergence times
+divTimeMat <- cophenetic(tree)
+
+# this vector will be TRUE for species pairs that are "too close" to be involved in HTT 
+# (a species here is a row/column index of the logical matrix)
+#tooClose <- divTimeMat < 80
+
+#Other illiegal pairs are the ones for which dS busco <0.81
+mrca_fitlerB = readRDS("mrca_FilterB.Rds")
+pairsALL = fread("Busco_new/pairsALL.txt")
 
 
+pairsALL <- mutate(pairsALL, tooClose = ifelse(mrca %in% mrca_fitlerB | divTime<80, TRUE, FALSE ))
 
-# STEP 2, contrasting the number of HTT per taxa in real and randomised hits.---------------------------------------
+#Only keep pairs that invovled species included in this analysis
+pairsALL <- filter(pairsALL, sp1 %in% meta$species & sp2 %in% meta$species)
+
+#write sp1 & sp2 in both sense
+pairsALL2 = select(pairsALL, c(sp2, sp1, tooClose)) %>%
+    rename(., sp1=sp2, sp2=sp1) %>% 
+    rbind(., select(pairsALL, c(sp1, sp2, tooClose))) %>% distinct()
+
+tooClose <- tapply(pairsALL2$tooClose, pairsALL2[,1:2], FUN=print)
+names(dimnames(tooClose)) <- NULL
+
+# we retrieve the species we will permute (tip numbers of the tree, for the clade/node we focus on)
+toShuffle <- tipsForNode(tree, node) 
+
+#######################################
+
+# STEP TWO, we permute species for htts (hits) of a batch ----------------------------------------------------------
+shuffleSpecies <- function(hits, superfamily) {
+    # we print progress, which is the only use of the superfamily argument
+    print(superfamily)
+    
+    # to speeds things up, we generate 10^5 permutations in a row as the vast
+    # majority lead to illegal transfers. This allows taking advantage of
+    # vectorised functions after that.
+    # for that, we need the number of hits
+    nHits <- nrow(hits)
+ 
+    # we replicate the hits 10^5 times, but incrementing species ids at each replicate (by the total number of species = l)
+    sp1 <- rep(0:(10^5 - 1), each = nHits) * nSpecies + hits$sp1
+    sp2 <- rep(0:(10^5 - 1), each = nHits) * nSpecies + hits$sp2
+    
+    # this function performs the permutations in parallel. job is a simple integer identifier
+    shuffleWork <- function(job) {
+
+        # we prepare a matrix of "legal permutations" 
+        # it is the same format as the newsp matrix, where row numbers = species ids, 
+        # columns are different permutations and values are replacement species
+        legalPermutations <- NULL
+
+        # indicator to tell when to stop
+        g <- 0
+         
+        # until we obtain maxn legal permutations:
+        repeat {
+           
+            # this creates a matrix of permuted species, with 10^5 columns (each is a vector of shuffled species)
+            # this is the workhorse function, all the rest is result handling
+            newsp[toShuffle, ] <- replicate(10^5, sample(toShuffle))
+
+            # we replace original species by the sampled ones in the transfers
+            # the left-hand column is the original species, the right-hand one the replacement one
+            newPairs <- cbind(newsp[sp1], newsp[sp2])
+
+            # we compute the number of illegal transfers per permutation (we use a matrix to quickly count them via colSums)
+            illegal <- colSums(matrix(tooClose[newPairs], nrow = nHits))
+            
+            if (any(illegal == 0L)) {
+
+                # we extract the columns corresponding to permutations with no illegal transfer and add them to the retained permutations
+                legalPermutations <- cbind(legalPermutations, newsp[, illegal == 0])
+                g <- ncol(legalPermutations)
+
+                # progress indicator
+                cat(".")
+            }
+            
+            # we exit once we have the number of legal permutations we want
+            if (g >= maxn) {
+                break
+            }
+        }
+
+    
+        # we unrolls the matrix of legal permutations (useful to replace original species with the sampled ones),
+        newSp <- as.vector(legalPermutations[, 1:maxn])
+        #  the index in this vector will be the original species identifier, and its value is the replacement species.
+        # We do not retain more than maxn legal permutations (there may actually be up to 10^5 if there were few hits).
+
+        # we generate a permutation id number
+        repl <- rep(1:maxn, each = nHits)
+        
+        # and we make a table of hits involving the permuted species
+        # we replicate the transfers maxn times but incrementing species numbers, 
+            
+        randomHits <- data.table(
+            sp1 = rep(hits$sp1, maxn) + (repl - 1L) * nSpecies,
+            sp2 = rep(hits$sp2, maxn) + (repl - 1) * nSpecies,
+            repl
+
+        )
+        
+        # we can now easily replace original species with the sampled ones.
+        # This is similar to what we did to create the newPairs matrix, except this time we use a data table
+        # we also use the job id to generate final permutation identifiers, which will have to differ between jobs
+        randomHits[, c("sp1", "sp2", "repl") := .(newSp[sp1], newSp[sp2], repl + job * maxn)]
+        
+        randomHits
+    }
+    
+    # we apply the above function to batches of hits in parallel
+    randomHits <- mclapply(1:nCPUs - 1L,
+        shuffleWork,
+        mc.cores = nCPUs,
+        mc.preschedule = F
+    )
+    
+    #and we stack the results in a single table
+    randomHits = rbindlist(randomHits)
+    
+    # we replace replication numbers with smaller number that do not exceed the number
+    # of permutation that was specified
+    randomHits[, repl := match(repl, unique(repl))]
+    
+    randomHits
+}
+
+# we apply the permutations to superfamilies successively
+randomHTTs <- Map(shuffleSpecies, hitList, names(hitList))
+
+# we stack randomized hits with read ones (that we can differentiate since their replication number is 0)
+randomHTTs = Map(rbind, hitList, randomHTTs)
+
+dir.create("permutations")
+saveRDS(randomHTTs, file = stri_c("permutations/allPermutations_", included, "_Node.", node, ".RDS"))
+
+#######################################
+
+# STEP THREE, contrasting the number of HTT per taxa in real and randomised hits.---------------------------------------
 
 # we import the permutations generated above (= pairs of species representing real and simulated HTT)
-randomHTTs <- readRDS("permutations/allPermutations_Node.308.RDS")
-
-taxa <- fread("additional_files/namedClades.txt")
-
-# we retrieve the species (tip numbers in the tree) composing each taxon that will be shown on the figure
-sps <- tipsForNodes(tree, taxa[onPlot == T, node])
-
-# taxon[x] below gives the taxon of species x
-taxon <- sps[, node[order(tip)]]
-    
+randomHTTs <- readRDS("permutations/allPermutations_", included, "_Node.", node, ".RDS")
 
 # this function counts htt per taxon in a given TE super family (or batch within a larger superfamily) 
 # to obtain statistics (means, quantiles) for number of simulated transfers for each taxon of interest
@@ -112,12 +402,7 @@ permutationStats[is.na(observed), observed := 0]
 # We make one plot per TE class ---------------------------------------------
 
 # we thus add a column for TE classes
-permutationStats[, class := ifelse(
-    test = grepl("CMC|hAT|Mariner|Maverick|Merlin|PIF|PiggyBac|DNA",
-                 superfamily),
-    yes = "DNA",
-    no = "RNA"
-)] 
+permutationStats = mutate(permutationStats, class = ifelse(str_detect(superfamily, "DNA/") | str_detect(superfamily, "RC/"), "DNA", "RNA"))
 
 # we compute stats for randomised and observed HTT numbers of the different taxa we selected and for each TE class
 # this means that we sum stats obtained over super families within classes
@@ -137,96 +422,20 @@ statsPerClass <- permutationStats[, .(
 sumSimulated <- statsPerClass[, sum(simulated), by = .(node = taxon)]
 statsPerClass <- statsPerClass[order(sumSimulated[match(taxon, node), -V1], class), ]
 
-# building the connected barplots (figure 3)
+# building the connected barplots 
 
-# we attribute taxa-specific colour used for the plots, the same as on figure 2
-statsPerClass[, col := taxa[match(taxon, node), col]]
-    
-# this function generates the linked barplot figure. 
-# Almost all the code adds stars for siginificance levels
-linkedPlots <- function(dt, space = 2, legend = F, ...) {
-    
-    b <- dt[, linkedBarPlot(
-        cbind(simulated, observed),
-        col = col,
-        junCol = fadeTo(col, "black", 0.4),
-        space = space,
-        main = ifelse(class[1] == "DNA", "DNA transposons", "Retrotransposons"),
-        border = grey(0.3),
-        ...
-    )]
-
-    # no star by default
-    dt[, stars := ""]
-    
-    # difference at the 5% level when observed numbers are beyond the right quantiles
-    dt[observed < qL5 | observed > qR5, stars := "*"]  
-    
-    # at the 1% level
-    dt[observed < qLc | observed > qRc, stars := "**"]
-    
-    # at the 1/1000 level
-    dt[observed < minNumber | observed > maxNumber, stars := "***"]
-
-    # TRUE when there are significant differences
-    significant <- dt$stars != ""
-    
-    # we will add stars in this case
-    labels <- dt[significant, ]
-
-    # below, we compute the vertical location of the stars
-    y <- cumsum(c(0, dt$observed))
-   
-    # we need to know the mid vertical position of barplot sectors to which we want to add stars
-    mids <- (y[which(significant)] + y[which(significant) + 1L]) / 2
-    
-    # and we adjust the vertical position of future stars to avoid collisions.
-    yPos <- c(0, mids)
-    for (i in 2:length(yPos)) {
-        delta <- yPos[i] - yPos[i - 1L]
-        if (delta < 15) {
-            yPos[i] <- yPos[i] + 15 - delta
-        }
-    }
-    
-    yPos <- c(yPos[-1], sum(dt$observed))
-    for (i in length(yPos):2) {
-        delta <- yPos[i] - yPos[i - 1L]
-        if (delta < 15) {
-            yPos[i - 1L] <- yPos[i - 1L] - 15 + delta
-        }
-    }
-    
-    yPos <- yPos[-length(yPos)]
-    t <- labels[, text(2 * space + 2.55, yPos, stri_c(round(observed / simulated, 2), stars), adj = c(0, 0.5))]
-    
-    # we add segments to link the stars to barplot sectors
-    segments(2 * space + 2,
-        mids,
-        2 * space + 2.5,
-        yPos,
-        col = dt$col[significant],
-        lwd = 1
-    )
-    
-    
-    # we add a legend if required (as there will be 2 plots on the figure)
-    if (legend) {
-        legend(
-            x = 2 * space + 3.5,
-            y = sum(dt$observed),
-            legend = rev(taxa[match(dt$taxon, node), name]),
-            bty = "n",
-            fill = rev(dt$col),
-            border = grey(0.3)
-        )
-    }
-}
+# we attribute taxa-specific colour used for the plots  (the same as on previous figures)
+colTaxa <- fread("colorsTaxa.txt")
+colTaxa <- left_join(meta[, c("group", "order")], colTaxa)
+statsPerClass[, col := colTaxa[match(taxon, order), col]]
 
 
+########################################
+
+#Final figure showing results of statistical test
 
 pdf(
-    file = "Figure3.pdf",
+    file = paste0("Figure3_", included, ".pdf"),
     width = 8,
     height = 4.5
 )
@@ -249,88 +458,3 @@ linkedPlots(statsPerClass[class == "DNA"], ylab = "number of transfers")
 linkedPlots(statsPerClass[class == "RNA"], legend = T)
 
 dev.off()
-
-
-
-# for ray-finned fishes, we record results for each super family (table S1) ------------------------------------------
-rayFin <- permutationStats[taxon == 312L, .(
-    mean_over_simulations = round(sum(simulated), 2),
-    max_over_simulations = sum(maxNumber),
-    observed = sum(observed)
-), by = testSplit(superfamily, ".", 1)]
-writeT(rayFin, "tableS1.txt")
-
-
-
-
-
-# ADDITIONAL ANALYSES NOT DETAILED IN THE PAPER ---------------------------------------------
-# investigating if more transfers between "fishes" and tetrapods involved aquatic tetrapods 
-# we first create a list indicating the main habitat of the species (species are tip numbers on the timetree)
-tetrapods <- tipsForNode(tree, 375)
-
-# we retrieve the aquatic species among tetrapods
-aquatic <- c(
-    tipsForNodes(tree, c(376, 472, 474, 514, 501, 463))$tip,
-    grep("Trichechus", tree$tip.label)
-) 
-
-# fishes as a paraphyletic group (non-tretrapods)
-fishes <- setdiff(1:length(tree$tip.label), tetrapods)
-
-habitatEffect <- function(tetrapods, aquatic) {
-    # this permutes tetrapod species among the tetrapod-fish HTT. This is fast
-    # since this cannot general illegal HTTs (the randomised hit will still be
-    # between fishes and tetrapods)
-    
-    tetraHits <- HTThits[(sp1 %in% tetrapods &
-        sp2 %in% fishes) |
-        (sp2 %in% tetrapods &
-
-            # hits between a tetrapod and a non-tetrapod
-            sp1 %in% fishes)]
-
-    # always puts the tetrapod species on the left
-    tetraHits[!sp1 %in% tetrapods, c("sp1", "sp2") := .(sp2, sp1)]
-
-    # renumbers the tetrapod species to help the simulation
-    tetraHits[, sp1 := match(sp1, tetrapods)]
-
-    aquatic <- match(aquatic, tetrapods)
-    l <- length(tetrapods)
-    permu <- replicate(10000, sample(l))
-    sp1 <- tetraHits$sp1 + rep(1:10000 - 1L, each = nrow(tetraHits)) * l
-    sp1 <- permu[sp1]
-    pairs <- rbind(
-        data.table(sp1 = tetraHits$sp1, repl = 0L),
-        data.table(sp1, repl = rep(1:10000, each = nrow(tetraHits)))
-    )
-    pairs[, habitat := "land"]
-    pairs[sp1 %in% aquatic, habitat := "water"]
-    perPerm <- pairs[repl > 0L, .N, by = .(repl, habitat)]
-    simu <- perPerm[, .(
-        mean = mean(N),
-        q1 = quantile(N, 1 / 1000),
-        q999 = quantile(N, 999 / 1000)
-    ), by = habitat]
-    real <- pairs[repl == 0L, .(observed = .N), by = habitat]
-    merge(simu, real, by = "habitat")
-}
-
-habitatEffect(tetrapods, aquatic)
-
-# same, but only within birds and mammals
-# to increase power, we use all hit groups, not just the "independent" ones
-HTThits <- retainedHits[!duplicated(hitgroup), data.table(
-    sp1 = chmatch(sp1, tree$tip.label),
-    sp2 = chmatch(sp2, tree$tip.label)
-)]
-
-birdsMams <- tipsForNodes(tree, c(477, 391))$tip
-aquaticBM <- intersect(aquatic, birdsMams)
-habitatEffect(birdsMams, aquaticBM)
-
-# same, but ignoring birds and mammals
-nonBirdsMams <- setdiff(tetrapods, birdsMams)
-aquaticNBM <- setdiff(aquatic, birdsMams)
-habitatEffect(nonBirdsMams, aquaticNBM)

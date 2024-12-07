@@ -1,169 +1,210 @@
+##########################################################
+####      This stage prepares the clustering of       ####
+###   We will use 2 independent clustering methods :   ###
+##         - per pair of species 
+##         - per clade
+##########################################################
 
+library(data.table)
+library(Biostrings)
+library(dplyr)
+library(stringi)
 
-## %######################################################%##
-#                                                          #
-####       This stage prepares the clustering of        ####
-####            TE hits to count HTT events.            ####
-#                                                          #
-## %######################################################%##
-
-
-# In this stage, we estimate the sequence identify between all TE copies within
-# all super families with blastn all vs all (referred to as "self blast"
-# afterwards). This will be used to determine if two hits represent the same HTT
-# (identity at the hits is lower than identity between copies in each clade,
-# referred to as "criterion 1" in the paper), and also for the analysis of TE
-# evolution within genomes
-
-# this script uses
-# - the TE-TE hits tabular file we retained in the previous stage
-# - the fasta file fo TE copies in the hits, from the previous stage
-
-# the output is the blast hits (tabular format) of all TE copies within each super family
+path = "~/Project/"
+setwd(path) 
 
 source("HTvFunctions.R")
 
-# where output file will go
-dir.create("TEs/clustering")
+#IMPORTANT
+#Choose a method
+method <- "perClade" 
+#method <- "perPairs"
 
-# selected TE-TE hits from the previous stage
-httHits <- fread("occ2000ds05.txt")
+##################################################
+##### Set parameters depending on the method chosen
+##################################################
+
+if(method=="perClade"){
+    out <- "TEs/clustering/selfBlastn_perClade"
+    key <- "mrca"
+} else {
+    out <- "TEs/clustering/selfBlastn_perPairs"
+    key <- "assembly"
+}
+
+##################################################
+######### Read intput = hits to clsuster #########
+##################################################
+httHits <- fread("TEs/clustering/dcMegablast/occ200dS05_dcMegablast.txt")
+
+##################################################
+# STEP 1 : Get copies to self blast
+##################################################
+
+copies <- select(httHits, c(ID.1, assembly.1, rep_superF.1, mrca)) %>% 
+    rename(., ID.2 = "ID.1", assembly.2 = "assembly.1") %>%
+    rbind(., select(httHits, c(ID.2, assembly.2, rep_superF.1, mrca))) %>% 
+    rename(., ID = "ID.2", assembly = "assembly.2") %>%
+    distinct()
+
+stats_copies <- copies %>%
+    #Group by assembly or mrca (in key) depending on the method chosen
+    group_by(across(all_of(key)), rep_superF.1) %>%
+    #Count the number of copies in each group
+    summarize(nbCopy = n())
+
+#The group with the most copies:
+maxCopies <- max(stats_copies$nbCopy)
+print(paste("Set max_target_seqs >", maxCopies)) #IMPORTANT
+
+    
+#We split per assembly or clade (in key) depending on the method chosen
+copies_split <- split(copies, copies[,..key])
+
+#Create output directory
+dir.create(paste0(out, "/copies/"), recursive = TRUE)
+
+#Function that take a tb in input, and extrat its IDs to a fasta
+extractID_f <- function(tb, dir, superF){
+#Input is a table woth 4 columns: ID, assembly, rep_superF.1, mrca
+#Assembly MUST be th same for all lines of the table
+#Only the 1st 2 columns are necessary to use this function
+    #Get assembly name
+    assembly = unique(tb$assembly)
+    #Write in a file the list of ID we want to extract from fasta
+    write.table(select(tb, ID), paste0(dir, superF, "_", assembly, ".bed"), quote=F, row.names=F, col.names=F)
+    #Extract these ID from fasta
+    system(paste0("seqtk subseq TEs/clustering/dcMegablast/copies/", assembly, "_", superF, ".IDs.fasta ", dir, superF, "_", assembly, ".bed > ", dir, superF, "_", assembly, ".IDs.fasta"))
+    #Remove the list of ID (not usefull anymore)
+    system(paste0("rm ", dir, superF,  "_", assembly, ".bed"))
+}
 
 
-# STEP ONE, we reduce the number of hits ---------------------------------------------------------
-# there are too many hits for this clustering, we only retain 200 of hits
-# per single-linkage cluster, as hits from the same cluster are very likely
-# to represent the same HTT
+#Put in a same file copies we want to blast
+lapply(copies_split, function(x){
 
-# we favor hits that involve the longest protein coding regions
-setorder(httHits, -length.aa)
-httHits <- httHits[occ <= 200L, ]
+    #output for this one :
+    dir <- paste0(out, "/copies/", key, "_", unique(x[,..key]), "/")
 
-# and write them to file
-writeT(httHits, "occ200ds05.txt")
+    #If there is already an output, does do it again
+    if(!dir.exists(dir)){ 
 
-# STEP TWO, we extract TE copies sequences in the retained hits ----------------------------------
+        #Create output
+        dir.create(dir)
 
-# we add species and classification information to copy names, as specified in the fasta file of TE copies, so we can extract them
-copies <- httHits[, union(
-    x = stri_c(sp1, ":", query, ":", f1, "#", superF),
-    y = stri_c(sp2, ":", subject, ":", f2, "#", superF)
-)]
+        #Split per super family
+        per_superF = split(x, x$rep_superF)
+    
+        lapply(per_superF, function(y){
+            # Get superfamily name
+            # But don't keep DNA/, LTR/n etc because "/" would  be interprated like a new directory
+            superF <- sub(".*/", "", unique(y$rep_superF))
 
-
-# writes them to temporary file used by seqtk
-write(copies, "temp.bed")
-
-# and we extract these sequences into a new fasta file
-seqtk(
-    fas = "TEKs/selectedCopiesAA300cl2000.fas",
-    bed = "temp.bed",
-    out = "TEs/clustering/selectedCopiesKs05occ200.fas"
-)
-file.remove("temp.bed")
-
-# STEP THREE, we prepare and launch the self blastn within each super family of the copies extracted above ------------------------------------------
-# we will rename copies with integers, to reduce the size of blastn files, and improve speed in further stages
-
-seqs <- readDNAStringSet("TEs/clustering/selectedCopiesKs05occ200.fas")
-copies <- names(seqs)
-
-# we extract super family names and replaces slashes with periods as file names will contains super family names
-superF <- gsub("/", ".", stri_extract_last(copies, regex = "[^#]+"), fixed = T)
-
-# we attribute integer numbers to copies, which we will used instead of long copy names
-copyID <- data.table(copy = copies, id = 1:length(copies))
-
-# we write this correspondence to disk as it will be reused many times afterwards
-writeT(copyID, "TEs/clustering/selectedCopiesKs05occ200.IDs.txt")
-
-# we replace copy names with the integers in the sequences
-names(seqs) <- copyID[chmatch(names(seqs), copy), id]
-
-dir.create("TEs/clustering/blastn/db", recursive = T)
-
-# we split copy sequences by super families, as blastn searches will be done within super families
-all.db <- split(seqs, superF)
-
-# we generate output file names
-fasNames <- stri_c("TEs/clustering/blastn/db/", names(all.db), ".fas")
-
-m <- Map(writeXStringSet, all.db, fasNames)
-  
-# we build blast databases
-m <- lapply(fasNames, function(x) {
-    system(paste("makeblastdb -dbtype nucl -in", x))
+            if(method=="perClade"){
+                #When method = clade, we have several assembly for a same clade
+                #So we need to look for copies which are in different files
+                per_assembly = split(y, y$assembly)
+                #apply the function on each assembly
+                lapply(per_assembly, extractID_f, dir = dir, superF = superF)
+                #concantenate all the ourputs of this mrca-superF in a singe file
+                system(paste0("cat ", dir, superF, "_*", ".IDs.fasta > ", dir, superF, ".fasta"))
+                #we can now delete the fasta we concatenated
+                system(paste0("rm ", dir, superF, "_GCA*.IDs.fasta"))
+            } else {
+                #When method = per pair of species, we can directly apply the function
+                extractID_f(y, dir = dir, superF = superF)
+            }   
+        })
+    }
 })
 
-# we will split query files for better CPU usage (num_threads of blastn isn't very efficient so we will leave it to 1)
-# and for better management of jobs + outputs (which are very big)
-
-# where split query fastas will go
-dir.create("TEs/clustering/blastn/split")
-
-# temporary blastn output files with go there
-dir.create("TEs/clustering/blastn/out")
-
-# and the output file will go there
-dir.create("TEs/clustering/blastn/done")
+##################################################
+# STEP 2 : Make database 
+##################################################
 
 
-# the number of sequences per super family, which we used to decide how much we split the queries
-nD <- as.numeric(lengths(all.db))
+dir.create(paste0(out, "/out/"))
+dir.create(paste0(out, "/tmp/"))
 
-# the criterion is the size of query * size of db
-nComp <- data.table(
-    query = names(all.db),
-    nc = nD * as.numeric(sapply(all.db, length))
-) 
+#Funciton to make a database on a fasta file
+makeDB <- function(files){
+  system(paste0("makeblastdb -in ",  dirCopies, files , ".fasta -dbtype nucl"))
+  return(NULL)
+}
 
-# we ensure that a query is not split in more than 200 parts
-nComp[, nt := round(nc / (max(nc) / 200))]
-nComp[nt == 0, nt := 1L]
+##################################################
+# STEP 3 : Generate command lines to launch blast searches
+##################################################
 
-# we create an integer index corresponding to the sub-query (max 200), for each sequences
-indices <- unlist(Map(function(x, y) {
-    rep(1:x, length.out = y)
-}, nComp$nt, nD))
+#Make an emtpy table telling path for input and output
+toDo_all <- data.table(file = as.character(), dirCopies = as.character(), dirOut = as.character())
 
-# this index is used to attribute each sequence to a sub-query (part)
-queryParts <- stri_c(
-    "TEs/clustering/blastn/split/",
-    rep(nComp$query, nD),
-    "_",
-    indices,
-    ".fas"
-)
+for(i in unique(copies[, ..key])){
+  dirCopies <- paste0(out, "/copies/", key, "_", i, "/")
+  dirOut <- paste0(out, "/out/", key, "_", i, "/")
+  dir.create(dirOut)
 
+  # we import the table we need to determine the blast searches to launch
+  searches <- list.files(dirCopies, pattern=".fasta$")
+  searches <- sub(".fasta", "", searches)
 
-# so we split the copy sequences in these sub queries
-splitSequences <- split(unlist(all.db, use.names = F), queryParts)
+  # in case jobs need to be relaunched, we list output files to avoid redoing already completed searches
+  done <- list.files(dirOut, pattern="_selfBlastn.out")
+  done <- sub("_selfBlastn.out", "", done)
+  toDo <- searches[!searches %in% done]
+  
+  #We fill out table toDo_all
+  toDo_all <- rbind(toDo_all,  data.table(file = toDo, dirCopies = rep(dirCopies, length(toDo)), dirOut = rep(dirOut, length(toDo))))
+  
+  #Run the fucntion makeDB on each of these files, using dirCopies for output for all of them
+  mcMap(f = makeDB, files = as.list(toDo), mc.cores = 10, mc.preschedule = T)
+}
 
-# and save them to fastas
-l <- Map(writeXStringSet, splitSequences, names(splitSequences))
-
-# we create the databases corresponding to the split queries
-dbs <- gsub(
-    pattern = "split",
-    replacement = "db",
-    x = stri_extract_last(
-        str = names(splitSequences),
-        regex = "[A-Z]+.[^_]+"
+#Write with one line per blast
+sink(paste0("commands_selfblast_", method, ".sh"))
+paste0("blastn ",
+    "-task dc-megablast ",
+    "-query ", toDo_all$dirCopies, toDo_all$file , ".fasta ",
+    "-db ", toDo_all$dirCopies, toDo_all$file , ".fasta ",
+    "-max_target_seqs ", (maxCopies+1),
+    " -max_hsps 1 ",
+    "-outfmt '6 qseqid sseqid pident length qstart qend sstart send bitscore'",
+    "-num_threads 10 | awk '{if ($4>=100 && $1<$2) print $0}' ",
+    "> ", toDo_all$dirOut, toDo_all$file, "_selfBlastn.out & PID=$!"
     )
-)
+sink()
+
+#IMPORTANT
+#ATTENTION add this lines thanks to bash:
+# sed -i 's/.*"blastn/"blastn/' commands_selfblast_perClade.sh
+# sed -i 's/"//g' commands_selfblast_perClade.sh
+# sed -e 's/$/\nwait $PID/' -i commands_selfblast_perClade.sh
 
 
-# creates a table listing the blast searches to do
-searches <- data.table(query = names(splitSequences), db = stri_c(dbs, ".fas"))
-searches[, out := gsub("split", "out", query)]
-searches[, out := gsub(".fas", ".out", out)]
+#Then i can split the file to run it in parallel (here 7014 lines, counting the waits)
+sed -n '1,1753p' commands_selfblast_perClade.sh > commands_selfblast_perClade.sh1
+sed -n '1754,3507p' commands_selfblast_perClade.sh > commands_selfblast_perClade.sh2 
+sed -n '3508,5260p' commands_selfblast_perClade.sh > commands_selfblast_perClade.sh3 
+sed -n '5261,7014p' commands_selfblast_perClade.sh > commands_selfblast_perClade.sh4 
 
-# we attribute batches of blastn searches to be launched from a given R instance, on a node (using sarray would have been better)
-searches[, batch := rep(1:(.N / 30), length.out = .N)]
-writeT(searches, "copiesToSelfBlast.txt")
 
-# we now run the script for the self-blastn searches. This is done by batches.
-# These use a lot of ram and take quite a bit of time, as we don't limit the number of hits
+#NOTE some files have copy of huge size that stuck the jobs
+#One might one to remove these copies
 
-# example for batch 1
-system('sbatch --mail-type=BEGIN,END,FAIL --cpus-per-task=4 --mem=120G --wrap="Rscript TEselfBlastn.R 1 4"')
+##################################################
+# STEP 4: run blast searches
+##################################################
+
+#This step consist in running the bash scripts generated above
+# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#!!!!!!!!!!! ATTENTION Make sure there is a WAIT between each line!!! VERY IMPORTANT !!!!!!!!!!!!
+# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#Otherwise could kill the server !
+
+
+##################################################
+# STEP 5: Remove copies too long
+##################################################
+
+#Sometimes a copy is anomaly long (eg 167kb) which lead to blast that do not work
+#In such a case, remove these copies from TEs/clustering/dcMegablast/occ200ds05_dcMegablast.txt and save it

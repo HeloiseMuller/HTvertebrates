@@ -7,12 +7,16 @@
 
 # this script is run at stages 7 and 13 of the pipeline
 
-source("HTvFunctions.R")
-require(seqinr)
+library(seqinr)
+library(Biostrings)
+library(ape)
+
+source("HTvFunctions")
 
 args <- commandArgs(trailingOnly = TRUE)
 
-# the arguments are
+# the arguments are:
+
 # - the path to the tabular file of HSPs between TE sequences, with columns query, subject, qStart, qEnd, sStart, sEnd
 TEhitFile <- args[1]
 
@@ -22,7 +26,7 @@ TEhitFile <- args[1]
 # the start coordinate of the HSP on the protein, and a logical telling whether the HSP is
 # in reverse orientation in respect to the TE
 # All values in query and subject columns in the first file must be found in the copy column of this file
-blastxFile <- args[2]
+blastxFile <- args[2] 
 
 # - the path to the fasta file containing the TE sequences. 
 fastaFile <- args[3]
@@ -35,7 +39,7 @@ nCPUs <- as.integer(args[5])
 
 dir.create(outputFolder, showWarnings = F)
 
-
+###################################
 
 # STEP ONE, preparation of the TE-TE copy alignments ---------------------------------------------------------------
 
@@ -44,7 +48,7 @@ TEhits <- fread(TEhitFile)
 blastx <- fread(blastxFile)
 
 # we only retain blastx HSPs that involve sequences in the TE-TE hits
-blastx <- blastx[copy %chin% TEhits[,c(query, subject)]]
+blastx <- blastx[copy %chin% TEhits[,c(copie1, copie2)]]
 
 # to keep track of hits, we give them an integer identifier in a column
 TEhits[, hit := 1:.N]
@@ -56,7 +60,7 @@ covPerCopy <- blastx[, sum(end - start + 1L), by = copy]
 # the query and subject TEs must have an alignment on proteins longer than 30 bp
 # "hits" below are simply row indices of TEhits table
 hits <- TEhits[, which(
-  query %chin% covPerCopy[V1 > 30L, copy] & subject %chin% covPerCopy[V1 > 30L, copy]
+  copie1 %chin% covPerCopy[V1 > 30L, copy] & copie2 %chin% covPerCopy[V1 > 30L, copy]
   )]
 
 # we split the work into several batches (jobs) for parallelism
@@ -70,13 +74,10 @@ hits <- splitEqual(sample(hits), n = nJobs)
 # we import the TE sequences
 seqs <- readDNAStringSet(fastaFile) 
 
-# we modify names to match copy names of the TEhits table (the fasta
-# file has longer sequences names that also comprise the host species)
-names(seqs) <- copyName(names(seqs))
-
 # we extract the parts of sequences involved in TE hits
-qSeqs <- TEhits[, subSeq(seqs[query], qStart, qEnd)]
-sSeqs <- TEhits[, subSeq(seqs[subject], sStart, sEnd)]
+#N.B. TEhits was order in script 6 with longest protein region then higher score (so if a copie has several hits, we subset the longest one)
+qSeqs <- TEhits[, subSeq(seqs[copie1], qStart, qEnd)]
+sSeqs <- TEhits[, subSeq(seqs[copie2], sStart, sEnd)]
 
 # we splits these subsequences into batches corresponding to the hit batches to be processed in parallel
 qSeqs <- lapply(hits, function(batch) qSeqs[batch])
@@ -84,18 +85,18 @@ sSeqs <- lapply(hits, function(batch) sSeqs[batch])
 
 # and we do the same for the hits themselves (we only retain coordinates of hits)
 TEhits <- lapply(hits, function(batch) {
-      TEhits[batch, .(query, subject, qStart, qEnd, sStart, sEnd)]
+      TEhits[batch, .(copie1, copie2, qStart, qEnd, sStart, sEnd)]
   })
 
 rm(seqs, covPerCopy) # we reclaim some RAM
 
 
+###################################
 
-
-# STEP TWO, TE-TE pairwise sequence alignment and Ka/Ks computation ----------------------------------------------------------------
+# STEP TWO, TE-TE pairwise sequence alignment and dN dS computation ----------------------------------------------------------------
 
 # below is the core function that pairwise aligns TEs and computes Ka/Ks on a batch of hits (jobs).
-KaKsForJob <- function(job) { # the only argument is the job number
+dNdSForJob <- function(job) { # the only argument is the job number
 
     # we align pairs of copies (this uses the Biostrings package)
     aln <- alignWithEndGaps(
@@ -112,7 +113,7 @@ KaKsForJob <- function(job) { # the only argument is the job number
     # see function definition in HTvFunctions.R
     nuc <- splitAlignment(
         aln = aln,
-        coords = TEhitBatch[, .(query, subject, qStart, qEnd, sStart, sEnd)]
+        coords = TEhitBatch[, .(copie1, copie2, qStart, qEnd, sStart, sEnd)]
     )
 
  
@@ -162,9 +163,9 @@ KaKsForJob <- function(job) { # the only argument is the job number
 
     # we determine the frame of the "query" base (base1)
     nuc[, frame1 := ifelse(
-      test = !rev1, 
-      yes = (pos1 - blastx[hsp1, protStart]) %% 3L + 1L,
-      no = -((blastx[hsp1, protStart] - pos1) %% 3L + 1L)
+      test = !rev1,  
+      yes = (pos1 - blastx[hsp1, protStart]) %% 3L + 1L, #to do when rev=FALSE
+      no = -((blastx[hsp1, protStart] - pos1) %% 3L + 1L) #to do when rev=TRUE
     )]
 
     # then for the subject base (base2)
@@ -210,11 +211,9 @@ KaKsForJob <- function(job) { # the only argument is the job number
     # we retain only complete codons (found 3 times)
     nuc <- nuc[codon %in% which(tabulate(codon) == 3L)]
 
-
-
-    # we prepare, then do, the Ka Ks computations -----------------------------
+    # we prepare, then do, the dN dS computations -----------------------------
     # we discard alignments that are too short
-    nuc <- nuc[aln %in% which(tabulate(aln) > 30L)]
+    nuc <- nuc[aln %in% which(tabulate(aln) > 30L)] #tabulate(aln) count the number of occurence for each aln (so the length of aln here)
 
     
     # we count the number of substitutions per alignment
@@ -242,22 +241,22 @@ KaKsForJob <- function(job) { # the only argument is the job number
       flattenedSequences$subject
     )
 
-    # and compute Ka and Ks with seqinr
-    KaKs <- lapply(alns, kaks)
+    # and compute dN and dS with the function kaks of seqinr
+    # this function will outputs columns named ka & ks, instead of dN & dS
+    dNdS <- lapply(alns, kaks)
 
     # we stack the results into a data.table
-    KaKs <- rbindlist(lapply(
-        X = KaKs,
+    dNdS <- rbindlist(lapply(
+        X = dNdS,
         FUN = as.data.table
     ))
-
     
     # we add columns for HSP identifiers and alignment lengths
     alnID <- flattenedSequences$aln
     
-    KaKs = data.table(
+    dNdS = data.table(
         hit = hits[[job]][alnID],
-        KaKs,
+        dNdS,
         length = nchar(flattenedSequences$query),
         nMut = nSubstitutions[match(alnID, aln), nMut],
         K80distance = K80distance[alnID],
@@ -265,21 +264,21 @@ KaKsForJob <- function(job) { # the only argument is the job number
     )
 
     # we write results for safety (we write the combined results at the end)
-    writeT(KaKs, stri_c(outputFolder, "/KaKs.", job, ".txt"))
+    write.table(dNdS, stri_c(outputFolder, "dNdS.", job, ".txt"), quote=F)
 
-    KaKs
+    dNdS
 }
 
 # we apply the above function for the different jobs in parallel
 res <- mclapply(
-    X = 1:length(TEhits),
-    FUN = KaKsForJob,
+    X = 1:length(TEhits), 
+    FUN = dNdSForJob,
     mc.cores = nCPUs,
     mc.preschedule = F
 )
 
 
-writeT(data = rbindlist(res), stri_c(outputFolder, "/allKaKs.txt"))
+write.table(rbindlist(res), stri_c(outputFolder, "alldNdS.txt"), quote=F, row.names=F) 
 
 # if we have reached this step, we may remove intermediate files
-unlink(stri_c(outputFolder, "/KaKs.*.txt"))
+unlink(stri_c(outputFolder, "dNdS.*.txt"))

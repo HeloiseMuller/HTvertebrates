@@ -13,6 +13,15 @@
 # Here, we return statistic for every pair of communities, in particular the number of pairs
 # of hits passing criterion 1.
 
+library(data.table)
+library(dplyr)
+library(Biostrings)
+library(stringi)
+library(stringr)
+library(parallel)
+
+path = "~/Project/"
+setwd(path) 
 
 source("HTvFunctions.R")
 
@@ -23,17 +32,80 @@ nCPUs <- as.integer(args[1])
 # we import the list of hit tables to cluster
 hitList <- readRDS("TEs/clustering/round2/hitsFor2ndClustering.RDS")
 
-
+##################################
+##################################
 
 # STEP ONE, list self-blastn files of copies for each family -------------------------------------------------------------------------------------
 
 # we retrieve super family names from the list of hits
-superF <- splitToColumns(names(hitList), "_", 1)
+superF <- splitToColumns(names(hitList), "_", columns=1)
 nHits <- sapply(hitList, nrow)
 nHits <- sort(tapply(nHits, superF, sum), T) # to process the super families with more hits first
 
+
+#Since i did my blast per clade, I have seperate files. 
+    #--> Make a function to group all outputs of a same superF 
+# we list the self blast result files generated in set 8-prepareClustering.R
 blastFiles <- list.files(
-    path = "TEs/clustering/selectedHits",
+    path = "TEs/clustering/selfBlastn_perClade/out",
+    recursive = TRUE,
+    pattern = "out",
+    full.names = T
+)
+
+filteredHitFolder <- "TEs/clustering/selfBlastn_perClade/out_catClades/"
+dir.create(filteredHitFolder)
+
+getHits <- function(superFi) {
+    files <- blastFiles[str_detect(blastFiles, superFi)]
+    
+    import <- function(file) {
+        hits <- fread(
+            input = file,
+            sep = "\t",
+            header = F,
+
+            # the function will be used in parallel, so we don't need more than 1 CPU here
+            nThread = 1,
+            
+            #we only need these columns for the clustering (we don't use the score, but we import it just in case)
+            select = c(1:3, 9),
+            col.names = c("query","subject","pID","score")
+        )
+        cat(".")
+        return(hits)
+    }
+
+      # we apply the function for each blast file of the super family, in parallel with 20 CPUs
+    hits <- mclapply(
+        X = files,
+        FUN = import,
+        mc.cores = min(20, length(files)),
+        mc.preschedule = F
+    )
+
+
+    hits = rbindlist(hits)
+
+    # some rare hits may have been selected several times, we remove duplicates
+    # N.B. We always have query < subjet
+    setorder(hits, -score)
+    hits <- hits[!duplicated(data.table(query, subject)), ]
+
+    # writes a single file per super
+    fwrite(hits, stri_c(filteredHitFolder, superFi, ".out"), sep='\t')
+
+    cat("-")
+}
+
+
+# we do it iteratively for each super family.
+m <- lapply(unique(sub("_selfBlastn.out", "", sub(".*/", "", blastFiles))), getHits)
+
+
+
+blastFiles <- list.files(
+    path = "TEs/clustering/selfBlastn_perClade/out_catClades",
     full.names = T
 )
 
@@ -49,26 +121,37 @@ names(blastFiles) <- gsub(
 
 
 # STEP TWO, we "confront" every two communities of hits, we do this per super family------------------------------------------------------------
-communityPairStats <- function(superFam) {
+
+#For this, we need to make unique ID for pair of species 
+copyIDs <-fread("TEs/clustering/dcMegablast/IDcopies_full.txt")
+nCopies <- nrow(copyIDs)
+print(nCopies)
+coef = 10^nchar(nCopies)
+
+#A unique identifier for a pair of copies will be copy1 * coef + copy2
+#eg: ID of the hit of copy 1 vs copy 4598 will be 
+    # 100004598 if nCopies = 9999 (coef = 4)
+    # 100000004598 if nCopies = 2271890 (coef = 7)
+
+communityPairStats <- function(superFi) {
     # we identify the self-blastn outputs we need, and import them
-    blastFile <- blastFiles[superFam]
+    blastFile <- blastFiles[superFi]
     blast <- fread(
         input = blastFile,
         sep = "\t",
-        header = F,
+        header = T,
         drop = 4,
-        col.names = c("query", "subject", "pID")
     )
 
     blast[, pID := as.integer(pID * 1000L)] # we convert pIDs to integers as we did for the htt hits (to save memory)
 
     # but here we don't create a matrix of pIDs where subject and queries are rows and columns numbers,
     # such matrix would be too big for this round.
-    # We create a unique subject-query identifier based on the fact that these are integers, and both lower than 10^6.
-    blast[, copyPair := 10^6 * query + subject]
+    # We create a unique subject-query identifier based on the fact that these are integers, and both lower than coef
+    blast[, copyPair := = query * coef + subject] 
 
     # we select the group of hits (one per mrca) for this superfamily
-    groups <- hitList[superF == superFam]
+    groups <- hitList[sub(".*[.]", "",superF) == superFi]
 
     # the function bellow processes hits of a given group, and will be launched in parallel
     processHitsOfGroup <- function(group) {
@@ -85,7 +168,7 @@ communityPairStats <- function(superFam) {
 
         # we selected the TE hits involving these copies. We only
         # need the subject-query pair identifier and the blast pID
-        selectedHits <- blast[query %in% uCopies & V2 %in% uCopies, .(copyPair, pID)]
+        selectedHits <- blast[query %in% uCopies & subject %in% uCopies, .(copyPair, pID)] #Jean had V2 instead of subject
 
         # we add a copyPair that does not actually exist (with 0 pID)
         # at the end of this table. This trick will help us later
@@ -134,8 +217,8 @@ communityPairStats <- function(superFam) {
 
             # we create the same pair identifiers we created for the blast results
             pairs[, c("qPair", "sPair") := .(
-                10^6 * q1 + q2,
-                10^6 * s1 + s2
+                coef * q1 + q2,
+                coef * s1 + s2
             )]
 
             # so we can retrieve within-clade sequence identities.
@@ -155,8 +238,8 @@ communityPairStats <- function(superFam) {
             # as before, the 2 hits will be connected in the best intra-clade
             # identity is higher than one inter-clade identity (that of hits)
             pairs[, maxIntra := pmax(intra1, intra2)]
-            pairs[, connected := inter1 < maxIntra |
-                inter2 < maxIntra]
+            pairs[, connected := inter1 <= maxIntra |
+                inter2 <= maxIntra]
             cat("*")
 
             # we return statistics for each community pair
@@ -199,21 +282,17 @@ communityPairStats <- function(superFam) {
         FUN = processHitsOfGroup
     ))
 
-    # writes to disk for safety, this is also returned by he function
-    writeT(
-        data = stats,
-        path = stri_c("TEs/clustering/round2/", superFam, ".all.txt")
-    )
+    fwrite(stats, stri_c("TEs/clustering/round2/", superFi, ".all.txt"), sep='\t')
 
-    print(paste("done", superFam))
+    print(paste("done", superFi))
 
     stats
 }
 
 # we finally apply the above for all super families
 res <- lapply(
-    X = names(nHits), # nHits names correspond to super family names
+    X = sub(".*[.]", "", names(nHits)), # nHits names correspond to super family names
     FUN = communityPairStats
 )
 
-writeT(rbindlist(res), "TEs/clustering/round2/all.txt")
+fwrite(rbindlist(res), "TEs/clustering/round2/all.txt", sep='\t')
