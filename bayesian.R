@@ -65,7 +65,7 @@ barplot_comp <- function(meta, orders, order_colours, data_vector, title, xlab, 
 }
 
 # fit a negative binomial regression model of the number of HTT (for one particular species)
-fit_model <- function(curr, agg, agg_function, time_mean, time_sd, habitat = FALSE, habitat_control = FALSE, alternative = FALSE, iter = 2000) {
+fit_model <- function(curr, agg, agg_function, time_mean, time_sd, habitat = FALSE, habitat_control = FALSE, alternative = FALSE, iter = 2000, strict_priors = TRUE) {
   # by default, model the raw number of HTT ("n")
   if (alternative == FALSE) {
     alternative <- "n"
@@ -117,6 +117,10 @@ fit_model <- function(curr, agg, agg_function, time_mean, time_sd, habitat = FAL
     prior_prox <- set_prior("normal(0,1)", class = "b", coef = "zdivTime")
     # effect of shared habitat
     prior_habitat <- set_prior("normal(0,3)", class = "b", coef = "habitatyes")
+    # to run everything with similar priors
+    if (strict_priors == TRUE) {
+      prior_habitat <- prior_prox
+    }
     prior_i <- set_prior("normal(0,10)", class = "Intercept")
     prior_shape <- set_prior("gamma(0.001,0.001)", class = "shape",
                              lb = 0)
@@ -368,7 +372,7 @@ fit_model_single <- function(HTT, species) {
 
 # wrapper around fit_model() to loop over all the species, apply fit_model()
 # to each one and then make one plot per species group
-fit_models_wrapper <- function(orders, meta, HTT, agg, agg_function, agg_string, with_type = FALSE, habitat = FALSE, habitat_control = FALSE, alternative = FALSE, iter = 2000) {
+fit_models_wrapper <- function(orders, meta, HTT, agg, agg_function, agg_string, with_type = FALSE, habitat = FALSE, habitat_control = FALSE, alternative = FALSE, iter = 2000, strict_priors = FALSE) {
   # all the stuff that will be returned as output by the function (one value per species)
   negative <- c()
   positive <- c()
@@ -417,7 +421,7 @@ fit_models_wrapper <- function(orders, meta, HTT, agg, agg_function, agg_string,
       curr <- HTT[HTT$species.1 == sp,]
       result <- fit_model(curr, agg, agg_function, time_mean, time_sd, 
                           habitat = habitat, habitat_control = habitat_control, 
-                          alternative = alternative, iter = iter) 
+                          alternative = alternative, iter = iter, strict_priors = strict_priors) 
       # store the various outputs from the model
       species <- c(species, sp)
       species_local <- c(species_local, sp)
@@ -510,9 +514,13 @@ get_HTT <- function(file_name) {
 
 # fit the NB regression model to all the species, make per-group plots 
 # and write the results to a series of files
-model_and_write <- function(ID_string, orders, meta, HTT, agg, agg_function, agg_string, with_type = FALSE, habitat = FALSE, habitat_control = FALSE, alternative = FALSE, iter = 2000) {
+model_and_write <- function(ID_string, orders, meta, HTT, agg, agg_function, agg_string, with_type = FALSE, habitat = FALSE, habitat_control = FALSE, alternative = FALSE, iter = 2000, strict_priors = FALSE) {
   # fit models
   affected <- fit_models_wrapper(orders, meta, HTT, agg = agg, agg_function = agg_function, agg_string = agg_string, with_type = with_type, habitat = habitat, habitat_control = habitat_control, alternative = alternative, iter = iter)
+  strict_priors_string <- ""
+  if (strict_priors == TRUE) {
+    strict_priors_string <- "_strict_priors"
+  }
   hab_string = ""
   if (habitat == TRUE) {
     hab_string <- "_habitat"
@@ -521,35 +529,35 @@ model_and_write <- function(ID_string, orders, meta, HTT, agg, agg_function, agg
     hab_string <- "_habitat_control"
   }
   # write results to files
-  write.table(affected[["positive"]], file = paste(ID_string, "_positive_", agg_string, hab_string, ".txt", sep = ""), quote = FALSE,
+  write.table(affected[["positive"]], file = paste(ID_string, "_positive_", agg_string, hab_string, strict_priors_string, ".txt", sep = ""), quote = FALSE,
               row.names = FALSE)
-  write.table(affected[["negative"]], file = paste(ID_string, "_negative_", agg_string, hab_string, ".txt", sep = ""), quote = FALSE,
+  write.table(affected[["negative"]], file = paste(ID_string, "_negative_", agg_string, hab_string, strict_priors_string, ".txt", sep = ""), quote = FALSE,
               row.names = FALSE)
-  write.table(affected[["intercepts"]], file = paste(ID_string, "_intercepts_", agg_string, hab_string, ".txt", sep = ""), quote = FALSE,
+  write.table(affected[["intercepts"]], file = paste(ID_string, "_intercepts_", agg_string, hab_string, strict_priors_string, ".txt", sep = ""), quote = FALSE,
               row.names = FALSE)
-  write.table(affected[["coefficients"]], file = paste(ID_string, "_coefficients_", agg_string, hab_string, ".txt", sep = ""), quote = FALSE,
+  write.table(affected[["coefficients"]], file = paste(ID_string, "_coefficients_", agg_string, hab_string, strict_priors_string, ".txt", sep = ""), quote = FALSE,
               row.names = FALSE)
-  write.table(affected[["species"]], file = paste(ID_string, "_species_", agg_string, hab_string, ".txt", sep = ""), quote = FALSE,
+  write.table(affected[["species"]], file = paste(ID_string, "_species_", agg_string, hab_string, strict_priors_string, ".txt", sep = ""), quote = FALSE,
               row.names = FALSE)
-  write.table(affected[["sample_sizes"]], file = paste(ID_string, "_sample_sizes_", agg_string, hab_string, ".txt", sep = ""), quote = FALSE,
+  write.table(affected[["sample_sizes"]], file = paste(ID_string, "_sample_sizes_", agg_string, hab_string, strict_priors_string, ".txt", sep = ""), quote = FALSE,
               row.names = FALSE)
-  write.table(affected[["upper"]], file = paste(ID_string, "_upper_", agg_string, hab_string, ".txt", sep = ""), quote = FALSE,
+  write.table(affected[["upper"]], file = paste(ID_string, "_upper_", agg_string, hab_string, strict_priors_string, ".txt", sep = ""), quote = FALSE,
               row.names = FALSE)
-  write.table(affected[["lower"]], file = paste(ID_string, "_lower_", agg_string, hab_string, ".txt", sep = ""), quote = FALSE,
+  write.table(affected[["lower"]], file = paste(ID_string, "_lower_", agg_string, hab_string, strict_priors_string, ".txt", sep = ""), quote = FALSE,
               row.names = FALSE)
-  write.table(affected[["expected_500"]], file = paste(ID_string, "_expected_500_", agg_string, hab_string, ".txt", sep = ""), quote = FALSE,
+  write.table(affected[["expected_500"]], file = paste(ID_string, "_expected_500_", agg_string, hab_string, strict_priors_string, ".txt", sep = ""), quote = FALSE,
               row.names = FALSE)
-  write.table(affected[["expected_1300"]], file = paste(ID_string, "_expected_1300_", agg_string, hab_string, ".txt", sep = ""), quote = FALSE,
+  write.table(affected[["expected_1300"]], file = paste(ID_string, "_expected_1300_", agg_string, hab_string, strict_priors_string, ".txt", sep = ""), quote = FALSE,
               row.names = FALSE)
-  write.table(affected[["check1"]], file = paste(ID_string, "_check1_", agg_string, hab_string, ".txt", sep = ""), quote = FALSE,
+  write.table(affected[["check1"]], file = paste(ID_string, "_check1_", agg_string, hab_string, strict_priors_string, ".txt", sep = ""), quote = FALSE,
                 row.names = FALSE)
-  write.table(affected[["check2"]], file = paste(ID_string, "_check2_", agg_string, hab_string, ".txt", sep = ""), quote = FALSE,
+  write.table(affected[["check2"]], file = paste(ID_string, "_check2_", agg_string, hab_string, strict_priors_string, ".txt", sep = ""), quote = FALSE,
                 row.names = FALSE) 
-  write.table(unlist(affected[["habitat_same"]]), file = paste(ID_string, "_habitat_same_", agg_string, hab_string, ".txt", sep = ""), quote = FALSE,
+  write.table(unlist(affected[["habitat_same"]]), file = paste(ID_string, "_habitat_same_", agg_string, hab_string, strict_priors_string, ".txt", sep = ""), quote = FALSE,
               row.names = FALSE) 
-  write.table(unlist(affected[["habitat_diff"]]), file = paste(ID_string, "_habitat_diff_", agg_string, hab_string, ".txt", sep = ""), quote = FALSE,
+  write.table(unlist(affected[["habitat_diff"]]), file = paste(ID_string, "_habitat_diff_", agg_string, hab_string, strict_priors_string, ".txt", sep = ""), quote = FALSE,
               row.names = FALSE)   
-  write.table(unlist(affected[["confidence"]]), file = paste(ID_string, "_confidence_", agg_string, hab_string, ".txt", sep = ""), quote = FALSE,
+  write.table(unlist(affected[["confidence"]]), file = paste(ID_string, "_confidence_", agg_string, hab_string, strict_priors_string, ".txt", sep = ""), quote = FALSE,
               row.names = FALSE)   
 }
 
@@ -1053,6 +1061,117 @@ plot_trees_large <- function(ID_string, ID_string_class1, ID_string_class2, agg_
   return(tree2)
 }
 
+# plot out the HPDIs on a tree for the effect of shared habitat
+plot_trees_shared_habitat <- function(ID_string, agg_string, tree, order_colours, meta) {
+  # read in the necessary data from file
+  affected_pos <- read.csv(paste(ID_string, "_positive_", agg_string, "_habitat.txt", sep = ""))$x
+  affected_neg <- read.csv(paste(ID_string, "_negative_", agg_string, "_habitat.txt", sep = ""))$x
+  print("Positive:")
+  print(length(affected_pos))
+  print("Negative:")
+  print(length(affected_neg))
+  lower <- read.csv(paste(ID_string, "_lower_", agg_string, "_habitat.txt", sep = ""))$x
+  upper <- read.csv(paste(ID_string, "_upper_", agg_string, "_habitat.txt", sep = ""))$x
+  species <- read.csv(paste(ID_string, "_species_", agg_string, "_habitat.txt", sep = ""))$x
+  affected_leaves <- get_affected_leaves(affected_pos, affected_neg, species)
+  # get colours for the species based on their species group
+  col_vector <- c()
+  for (sp in species) {
+    col_vector <- c(col_vector, order_colours[[meta[meta$species == sp, "group"]]])  
+  }
+  # associate numbers to species
+  number_vector <- c()
+  for (sp in species) {
+    number_vector <- c(number_vector, meta[meta$species == sp, "numbers"])  
+  }  
+  # make a data frame with all the data that will be necessary for the plot
+  curr_data <- data.frame("lower" = lower,
+                          "upper" = upper,
+                          "species" = species,
+                          "Effect_of_similar_habitat" = affected_leaves,
+                          "colours" = col_vector,
+                          "numbers" = number_vector)
+  # create file name
+  file_name <- paste("figures/", ID_string, "_tree_HPDIs_only_", agg_string, "_habitat.pdf", sep = "")
+  # set up various parameters of the plotting area
+  height = 50
+  n <- length(curr_data$species)
+  HPDI_limits <- c(1 - 2.5, n + 2.6)
+  tree_factor <- 0.02
+  # join in the data from the files with the structure of the phylogeny
+  x <- full_join(as_tibble(tree), curr_data, join_by(label == species))
+  tree2 <- as.treedata(x)
+  # create figure
+  pdf(file_name, width = 15, height = height)
+  # start by drawing the phylogeny at the very left
+  # annotate negative effects with a black dot, positive effects with an orange dot
+  # and the rest in grey
+  tree_plot <- ggtree(tree2, layout = "rectangular") +
+    geom_tippoint(pch=16, size=5, aes(col=Effect_of_similar_habitat)) +
+    scale_color_manual(values=c("black", "gray92","orange")) +
+    theme(legend.key.size = unit(1, 'cm'),
+          legend.title = element_text(size=40),
+          legend.text = element_text(size=40),
+          legend.position="bottom") +
+    theme(legend.position = "none") +
+    scale_y_continuous(expand=expand_scale(tree_factor))
+  # loop over species groups
+  for (order in names(order_colours)) {
+    # get only the species in current group
+    curr_species <- meta[meta$group == order, "species"]
+    # draw a rectangle over the part of the tree corresponding to the
+    # species group
+    if (length(curr_species > 0)) {
+      mrca <- MRCA(tree2, curr_species)
+      tree_plot <- tree_plot + geom_hilight(node=mrca, fill=order_colours[[order]])
+      tree_data <- fortify(tree2)
+      curr <- tree_data[tree_data$node == mrca,]
+      # add species group names
+      size <- 10
+      if (order %in% c("Squamata", "Afrotheria", "Coelacanthi", "Testudines")) {
+        size <- 6
+      }
+      tree_plot <- tree_plot + annotate("text", x = max(min(curr$x - 200, 500), 100), y = curr$y, label = order,
+                                        size = unit(size, "pt"))
+    }
+  }
+  # get the order of the tips of the tree so that the rest of the plot
+  # could show the species in the same order
+  tip_order <- get_taxa_name(tree_plot)
+  rownames(curr_data) <- curr_data$species
+  # reorder the data in the same order
+  curr_data <- curr_data[tip_order,]
+  curr_data$indices <- rev(seq(1, n))
+  # add a number for each species
+  tree_plot <- tree_plot + annotate("text", x = 700, y = curr_data$indices, label = curr_data$numbers,
+                                    size = unit(2, "pt"))
+  # plot out HPDIs
+  HPDI_plot <- ggplot(curr_data, aes(x=lower, y=indices, col = Effect_of_similar_habitat)) + geom_point() +
+    geom_point(aes(x=upper, y=indices, col = Effect_of_similar_habitat)) + 
+    labs(col = "Effect of divergence time")
+  HPDI_plot <- HPDI_plot + geom_segment(aes(x = lower, y = indices, xend = upper, yend = indices, col = Effect_of_similar_habitat),
+                                        inherit.aes = FALSE, data = curr_data) +
+    geom_vline(xintercept = 0) +
+    scale_color_manual(values=c("black", "gray70","orange")) + guides(col = guide_legend(order = 2)) +
+    geom_vline(xintercept = 0, linewidth = 1) + theme(axis.line.y = element_blank(),
+                                                      axis.title.y = element_blank(),
+                                                      axis.text.y = element_blank(),
+                                                      axis.ticks.y = element_blank(), 
+                                                      panel.grid.major = element_blank(), 
+                                                      panel.grid.minor = element_blank(),
+                                                      panel.background = element_blank(),
+                                                      plot.title = element_text(size = 30),
+                                                      axis.text.x = element_text(size = 20),
+                                                      axis.title = element_text(size = 20)) +
+    scale_y_continuous(limits = HPDI_limits, expand=c(0,tree_factor)) + 
+    xlab("Excess log HT in similar habitats") +
+    ggtitle("Effect of similar habitat") + guides(col = guide_legend(order = 1)) +
+    theme(legend.position = "none")
+  grid.arrange(tree_plot, HPDI_plot, ncol=2)
+  dev.off()
+  return(tree2)
+}
+
 # subsampling analysis to compare the strength of the effect between 
 # Class 1 and Class 2, with Class 2 events subsampled to be of the same number as Class 1 events
 # the analysis is performed for one specific species
@@ -1200,6 +1319,8 @@ model_and_write("class1", orders, meta, HTT, agg = TRUE, agg_function = median, 
 model_and_write("class2", orders, meta, HTT, agg = TRUE, agg_function = median, agg_string = "median", alternative = "type2", iter = 10000)
 # test the effect of shared habitat
 model_and_write("agg", orders, meta, HTT, agg = TRUE, agg_function = median, agg_string = "median", iter = 10000, habitat = TRUE)
+# test the effect of shared habitat with a regularising prior for the habitat effect as well
+model_and_write("agg", orders, meta, HTT, agg = TRUE, agg_function = median, agg_string = "median", iter = 10000, habitat = TRUE, strict_priors = TRUE)
 # the effect of divTime controlling for shared habitat
 # this is the main analysis reported in the manuscript
 model_and_write("agg", orders, meta, HTT, agg = TRUE, agg_function = median, agg_string = "median", iter = 10000, habitat = TRUE, habitat_control = TRUE)
@@ -1345,6 +1466,7 @@ lower_no_habitat_control <- read.csv("agg_lower_median.txt", sep = "\t")$x
 upper_no_habitat_control <- read.csv("agg_upper_median.txt", sep = "\t")$x
 lower_habitat_control <- read.csv("agg_lower_median_habitat_control.txt", sep = "\t")$x
 upper_habitat_control <- read.csv("agg_upper_median_habitat_control.txt", sep = "\t")$x
+lower_shared_habitat_strict_priors <- read.csv("agg_lower_median_habitat_strict_priors.txt", sep = "\t")$x
 ######
 
 # effect of shared habitat
@@ -1361,6 +1483,7 @@ mean(lower_shared_habitat_complete > 0)
 mean(upper_shared_habitat_complete < 0)
 sum(lower_shared_habitat_complete > 0)
 sum(upper_shared_habitat_complete < 0)
+sum(lower_shared_habitat_strict_priors > 0, na.rm = TRUE)
 # for the plot, order the numbers the same as the species
 ordered_numbers <- c()
 for (sp in species) {
@@ -1368,6 +1491,7 @@ for (sp in species) {
 }
 plot_trees("agg", "median", tree, habitat = TRUE, numbers = ordered_numbers)
 plot_trees("agg", "median", tree, habitat_control = TRUE, numbers = ordered_numbers)
+plot_trees_shared_habitat("agg", "median", tree, order_colours, meta)
 
 ######
 pdf(file = "figures/shared_habitat_effect.pdf", width = 10, height = 20)
