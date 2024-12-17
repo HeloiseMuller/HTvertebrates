@@ -60,13 +60,13 @@ The directory `demo_TeKaKs` is provided to demo the script `TEKaKs.R` (see `Demo
 
 ## Steps of the pipeline
 
-###STEP A : Download genomes
+### STEP A : Download genomes
 Script 01 is the script used by Zhang et al. (2020) to download genomes from a file containing accession links.
 Script 01_2 is the script used in Muller el al. to download the selected genomes from the list of all genomes available.
 
-###STEP B : TE annotation (scripts 02 and 03) + similarity search (script 04)
+### STEP B : TE annotation (scripts 02 and 03) + similarity search (script 04)
 
-###STEP C : Generate dS distribution under vertical inheritance (script 5)
+### STEP C : Generate dS distribution under vertical inheritance (script 5)
 
 STEP B \& STEP C are independent; they can be run at the same time.
 
@@ -75,7 +75,7 @@ This step can be started only once both STEP A \& STEP B are done
 Script 06 runs 06bis and 06tris. Similarly, script 07 runs script 07bis.
 Script 07-08 is an addition that was not present in Zhang et al. (2020). This script has to be run between scripts 07 and 08. 
 
-###STEP E : Clustering
+### STEP E : Clustering
 Here we used two independent methods for clustering:
 	- Clustering per clade, similarly to what was done in Zhang et al. 2020.
 	- Clustering per pair of species, developed for this study
@@ -94,13 +94,13 @@ For clustering per pairs of species :
 
 Regarding scripts 10, make sure to run clustering 10-hitClusteringRound2_perClade.R before running script 10-hitClusteringRound2_perPairs.R, as the steps in common are not repeated. Indeed,  10-hitClusteringRound2_perPairs.R does not regenerate "involvedProtOCC200dS05.self.out".
 
-###STEP F : Apply filters to keep confident hit groups only (script 11)
+### STEP F : Apply filters to keep confident hit groups only (script 11)
 
-###STEP G : analyses in common with Zhang et al. (2020)
+### STEP G : analyses in common with Zhang et al. (2020)
 
 Scripts 12 to 16 have to be run on final output of script 10-hitClusteringRound2_perClade.R, ie occ200HitGroup_perclade.txt.
 
-###STEP H : analyses specific to Muller et al.
+### STEP H : analyses specific to Muller et al.
 
 These scripts do not follow any numbering. Those analyses have to be run on the clustering that was done independently for each pairs of species, ie on occ200HitGroup_perPairs.txt.
 test_lifeStyle.R tests for an excess of transfers in the aquatic habitat.
