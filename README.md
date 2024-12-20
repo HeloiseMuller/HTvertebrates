@@ -57,14 +57,14 @@ The directory `additonal_files` contains
   - `supplementary-data3-TEcomposition_per_species.txt` is generatd by the scripts and is provided with the paper, but we also provide it here if to facilitate the reproduction of the results.
 - Muller, which contains files from the paper Muller et al. (submitted)
   - Datasets correspond to the additional datasets of the paper. Because of size limitations, only the first 10,000 lines are included for DatasetS3 and S4. Whole datasets can be found at https://doi.org/10.5281/zenodo.14514502. DatasetS2 is essetial to run the pipeline. It is the phylogenetic tree containing all the species of the dataset.
-The tips are as follow: species_genus. It has to contains the divergence time, although unprecisions are no big deal as thedetection of HT is only based on the topology. The important is to have a correct topology and no polytomy .
+The tips are as follow: species_genus. It has to contains the divergence time, although unprecisions are no big deal as the detection of HT is only based on the topology. The important is to have a correct topology and no polytomy.
   - metadata.tbl is an essential input for the pipeline. It is a tab delimited table that has to contain at least these three columns: 
     - assembly: the name of the assembly (GCA_xxx.1); the fasta should start by this
     - species: species name written as "species genus"
     - dbBusco: the busco database to use for this genome. It can also contain any additional columns, such as taxonomical or ecological data
 
-Scripts need the following in $PATH:
-seqtk, blastn,
+Scripts need the following in `$PATH:
+seqtk, blastn
 
 - The directory `demo_TeKaKs` is provided to demo the script `TEKaKs.R` (see `Demonstration of TEKaKs.R` below), but is not required to run the pipeline.
 
@@ -111,24 +111,24 @@ For clustering per pairs of species :
 
 Regarding scripts 10, make sure to run clustering `10-hitClusteringRound2_perClade.R` before running `10-hitClusteringRound2_perPairs.R`, as the steps in common are not repeated. Indeed, `10-hitClusteringRound2_perPairs.R` does not regenerate `involvedProtOCC200dS05.self.out.
 
-### STEP F : Apply filters to keep confident hit groups only (script 11)
+### STEP F : Apply filters to keep confident hit groups only 
 `11-hitGroupEvaluation.R` can filter out hit groups of low confidence clusterized per clade (in this case, uncomment `method <- "perClade"`) or clusterized per pairs of species (in this case, uncomment `method <- "perPairs"`). If one wants to run both, the scripts has to be run two times.
 
 ### STEP G : Analyses in common with Zhang et al. (2020)
 
-Scripts 12 to 16 have to be run on final output of script `10-hitClusteringRound2_perClade.R`, ie on `occ200HitGroup_perclade.txt`.
-`12-HTTeventCount.R` estimates the minimum nimber of independent transfers that took place across the dataset.
-`13-TEdNdSWithinGenomes.R` computes dN and dS values for related copies within a genomes.
-`14-showHTTonTree.R` plots a circular phylogeny of all the dataset and shows the independent HTT events estimated in `12-HTTeventCount.R`.
-`15-testHTTexcess.R` tests whether there is an excess of HTT in some taxonomic groups thanks to a permutation approch.
-`16-TEcompositionAndEvolution.R` generates bar plots to illustrate the total number of copies annotated for each TE superfamilies and the total number of HTT events they are involved in. It also compare the dNdS under vertical transmission (values generated in `13-TEdNdSWithinGenomes.R` ) and under HT.
+Scripts 12 to 16 have to be run on final output of script `10-hitClusteringRound2_perClade.R`, i.e. on `occ200HitGroup_perclade.txt`. 
+- `12-HTTeventCount.R` estimates the minimum nimber of independent transfers that took place across the dataset.
+- `13-TEdNdSWithinGenomes.R` computes dN and dS values for related copies within a genomes.
+- `14-showHTTonTree.R` plots a circular phylogeny of all the dataset and shows the independent HTT events estimated in `12-HTTeventCount.R`.
+- `15-testHTTexcess.R` tests whether there is an excess of HTT in some taxonomic groups thanks to a permutation approch.
+- `16-TEcompositionAndEvolution.R` generates bar plots to illustrate the total number of copies annotated for each TE superfamilies and the total number of HTT events they are involved in. It also compare the dNdS under vertical transmission (values generated in `13-TEdNdSWithinGenomes.R` ) and under HT.
 
 ### STEP H : Analyses specific to Muller et al.
 
-These scripts do not follow any numbering. Those analyses have to be run on the clustering that was done independently for each pairs of species, ie on `occ200HitGroup_perPairs.txt`. <br>
-`test_lifeStyle.R` tests for an excess of transfers in the aquatic habitat. <br>
-`test_phylogeneticProximity_global.R` tests the effect of the phylogenetic proximity globally. <br>
-`test_bayesian.R` runs all Bayesian analyses. <br>
+These scripts do not follow any numbering. Those analyses have to be run on the clustering that was done independently for each pairs of species, i.e. on - `occ200HitGroup_perPairs.txt`. 
+- `test_lifeStyle.R` tests for an excess of transfers in the aquatic habitat. 
+- `test_phylogeneticProximity_global.R` tests the effect of the phylogenetic proximity globally. 
+- `test_bayesian.R` runs all Bayesian analyses. <br>
 
 Adapting this pipeline to other datasets, hardware configuration, and automating all procedures require modifications to the code. Some parts of the analysis were not automated.
 
