@@ -113,12 +113,12 @@ For clustering per pairs of species :
 Regarding scripts 10, make sure to run clustering `10-hitClusteringRound2_perClade.R` before running `10-hitClusteringRound2_perPairs.R`, as the steps in common are not repeated. Indeed, `10-hitClusteringRound2_perPairs.R` does not regenerate `involvedProtOCC200dS05.self.out`.
 
 ### STEP F : Apply filters to keep confident hit groups only 
-`11-hitGroupEvaluation.R` can filter out hit groups of low confidence clusterized per clade (in this case, uncomment `method <- "perClade"`) or clusterized per pairs of species (in this case, uncomment `method <- "perPairs"`). If one wants to run both, the scripts has to be run two times.
+`11-hitGroupEvaluation.R` can filter out hit groups of low confidence clusterized per clade (in this case, uncomment `method <- "perClade"`) or clusterized per pairs of species (in this case, uncomment `method <- "perPairs"`). If one wants to run both, the scripts has to be run two times. 
 
 ### STEP G : Analyses in common with Zhang et al. (2020)
 
 Scripts 12 to 16 have to be run on final output of script `10-hitClusteringRound2_perClade.R`, i.e. on `occ200HitGroup_perclade.txt`. 
-- `12-HTTeventCount.R` estimates the minimum nimber of independent transfers that took place across the dataset.
+- `12-HTTeventCount.R` estimates the minimum number of independent transfers that took place across the dataset. 
 - `13-TEdNdSWithinGenomes.R` computes dN and dS values for related copies within a genomes.
 - `14-showHTTonTree.R` plots a circular phylogeny of all the dataset and shows the independent HTT events estimated in `12-HTTeventCount.R`.
 - `15-testHTTexcess.R` tests whether there is an excess of HTT in some taxonomic groups thanks to a permutation approch.
@@ -126,15 +126,15 @@ Scripts 12 to 16 have to be run on final output of script `10-hitClusteringRound
 
 ### STEP H : Analyses specific to Muller et al.
 
-These scripts do not follow any numbering. Those analyses have to be run on the clustering that was done independently for each pairs of species, i.e. on `occ200HitGroup_perPairs.txt` (Dataset S4 and S5). 
+These scripts do not follow any numbering. Those analyses have to be run on the clustering that was done independently for each pairs of species, i.e. on `occ200HitGroup_perPairs.txt` 
 - `test_lifeStyle.R` tests for an excess of transfers in the aquatic habitat. 
 - `test_habitatSharing.R` tests for an excess of transfers in a shared habitat (i.e. aquatic -> aquatic or terrestrial  --> terrestrial )
 - `test_phylogeneticProximity_global.R` tests the effect of the phylogenetic proximity globally. 
 - `test_bayesian.R` runs all Bayesian analyses. <br>
-The following is run on the other clustering approach (Datatset S3):
+The following is run on the other clustering approach:
 - `test_TELosses` tests for losses of TE.
 
-Adapting this pipeline to other datasets, hardware configuration, and automating all procedures require modifications to the code. Some parts of the analysis were not automated.
+Adapting this pipeline to other datasets, hardware configuration, and automating all procedures requires modifications to the code. Some parts of the analysis were not automated.
 
 
 ## Installation
@@ -200,3 +200,7 @@ The final output corresponds to results of the publication (please see the publi
 - `Figure S2` is produced in script `11-hitGroupEvaluation.R`
 - `Figure S7` is produced in script `test_habitatSharing.R
 - `Figure S9` is produced in script `15-testHTTexcess.R`
+- `Supplemental Dataset S3` is produced in script `12-HTTeventCount.R`
+- `Supplemental Dataset S4` is produced in script `11-hitGroupEvaluation.R`
+- `Supplemental Dataset S5` is produced in script `test_lifeStyle.R`
+- `Supplemental Dataset S6` is produced in script `test_bayesian.R`
