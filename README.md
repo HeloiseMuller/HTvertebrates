@@ -38,7 +38,7 @@ Hardware requirements: a linux cluster with
 - ≥2 TB of free hard drive space 
 - an internet connection to download the genome sequences (>10 MB/s is recommended). 
 
-On this hardware, the pipeline on the 247 animal genomes should take a few months to complete.
+On this hardware, the pipeline on the 247 animal genomes should take a few months to complete with a similar taxa composition.
 
 ## File description
 The R scripts whose names start with numbers performed successive stages of the analysis. The purpose of each script is described by comments at the beginning of the script. 
@@ -56,7 +56,7 @@ The directory `additonal_files` contains
   - `superF.txt` makes the correspondance between repeatModeler family codes (first column), TE class (2nd column) and more common TE superfamily names (3rd column). It is used in stages 15 and 16.
   - `supplementary-data3-TEcomposition_per_species.txt` is generatd by the scripts and is provided with the paper, but we also provide it here if to facilitate the reproduction of the results.
 - `Muller`, which contains files from the paper Muller et al. (submitted)
-  - Datasets correspond to the additional datasets of the paper. Because of size limitations, only the first 10,000 lines are included for DatasetS3 and S4. Whole datasets can be found at https://doi.org/10.5281/zenodo.14514502. DatasetS2 is essential to run the pipeline. It is the phylogenetic tree containing all the species of the dataset.
+  - Datasets correspond to the additional datasets of the paper. Because of size limitations, only the first 10,000 lines are included for DatasetS3 and S4, and Dataset S7 is not including. All and whole datasets can be found at https://doi.org/10.5281/zenodo.15297793. DatasetS2 is essential to run the pipeline. It is the phylogenetic tree containing all the species of the dataset.
 The tips are as follow: species_genus. It has to contain the divergence time, although unprecisions are no big deal as the detection of HT is only based on the topology. The important is to have a correct topology and no polytomy.
   - metadata.tbl is an essential input for the pipeline. It is a tab delimited table that has to contain at least these three columns: 
     - assembly: the name of the assembly (GCA_xxx.1); the fasta should start by this
@@ -130,6 +130,7 @@ These scripts do not follow any numbering. Those analyses have to be run on the 
 - `test_lifeStyle.R` tests for an excess of transfers in the aquatic habitat. 
 - `test_phylogeneticProximity_global.R` tests the effect of the phylogenetic proximity globally. 
 - `test_bayesian.R` runs all Bayesian analyses. <br>
+- `test_TELosses` tests for losses of TE.
 
 Adapting this pipeline to other datasets, hardware configuration, and automating all procedures require modifications to the code. Some parts of the analysis were not automated.
 
@@ -189,10 +190,10 @@ The final output corresponds to results of the publication (please see the publi
 
 ## Output of the pipeline published in Muller et al.
 The final output corresponds to results of the publication (please see the publication for their description).
-- `Figure 1a` and `Figure S1` are produced in script `16-TEcompositionAndEvolution.R`
+- `Figure 1a` and `Figure S3` are produced in script `16-TEcompositionAndEvolution.R`
 - `Figure 1b` is produced in script `14-showHTTonTree.R` 
-- `Figure 2a` and `Figure S5` are produced in script `test_lifeStyle.R`
+- `Figure 2a` and `Figure S6` are produced in script `test_lifeStyle.R`
 - `Figure 3a` is produced in `test_phylogeneticProximity_global.R`
-- `Figure 3b-g`, `Figure 4`,  `Figure S4` , `Figure S8` and `Figure S9` are produced in script `test_bayesian.R`
+- `Figure 3b-g`, `Figure 4`,  `Figure S6` , `Figure S10` and `Figure S11` are produced in script `test_bayesian.R`
 - `Figure S2` is produced in script `11-hitGroupEvaluation.R`
-- `Figure S6` is produced in script `15-testHTTexcess.R`
+- `Figure S9` is produced in script `15-testHTTexcess.R`
