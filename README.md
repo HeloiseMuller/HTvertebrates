@@ -126,10 +126,12 @@ Scripts 12 to 16 have to be run on final output of script `10-hitClusteringRound
 
 ### STEP H : Analyses specific to Muller et al.
 
-These scripts do not follow any numbering. Those analyses have to be run on the clustering that was done independently for each pairs of species, i.e. on `occ200HitGroup_perPairs.txt`. 
+These scripts do not follow any numbering. Those analyses have to be run on the clustering that was done independently for each pairs of species, i.e. on `occ200HitGroup_perPairs.txt` (Dataset S4 and S5). 
 - `test_lifeStyle.R` tests for an excess of transfers in the aquatic habitat. 
+- `test_habitatSharing.R` tests for an excess of transfers in a shared habitat (i.e. aquatic -> aquatic or terrestrial  --> terrestrial )
 - `test_phylogeneticProximity_global.R` tests the effect of the phylogenetic proximity globally. 
 - `test_bayesian.R` runs all Bayesian analyses. <br>
+The following is run on the other clustering approach (Datatset S3):
 - `test_TELosses` tests for losses of TE.
 
 Adapting this pipeline to other datasets, hardware configuration, and automating all procedures require modifications to the code. Some parts of the analysis were not automated.
@@ -190,10 +192,11 @@ The final output corresponds to results of the publication (please see the publi
 
 ## Output of the pipeline published in Muller et al.
 The final output corresponds to results of the publication (please see the publication for their description).
-- `Figure 1a` and `Figure S3` are produced in script `16-TEcompositionAndEvolution.R`
-- `Figure 1b` is produced in script `14-showHTTonTree.R` 
-- `Figure 2a` and `Figure S6` are produced in script `test_lifeStyle.R`
-- `Figure 3a` is produced in `test_phylogeneticProximity_global.R`
-- `Figure 3b-g`, `Figure 4`,  `Figure S6` , `Figure S10` and `Figure S11` are produced in script `test_bayesian.R`
+- `Figure 2A` and `Figure S3` are produced in script `16-TEcompositionAndEvolution.R`
+- `Figure 2B` is produced in script `14-showHTTonTree.R` 
+- `Figure 3A` and `Figure S8` are produced in script `test_lifeStyle.R`
+- `Figure 4A` is produced in `test_phylogeneticProximity_global.R`
+- `Figure 4B-G`, `Figure 5`,  `Figure S6` , `Figure S10` and `Figure S11` are produced in script `test_bayesian.R`
 - `Figure S2` is produced in script `11-hitGroupEvaluation.R`
+- `Figure S7` is produced in script `test_habitatSharing.R
 - `Figure S9` is produced in script `15-testHTTexcess.R`
