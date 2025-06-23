@@ -198,7 +198,7 @@ The final output corresponds to results of the publication (please see the publi
 - `Figure 4A` is produced in `test_phylogeneticProximity_global.R`
 - `Figure 4B-G`, `Figure 5`,  `Figure S6` , `Figure S10` and `Figure S11` are produced in script `test_bayesian.R`
 - `Figure S2` is produced in script `11-hitGroupEvaluation.R`
-- `Figure S7` is produced in script `test_habitatSharing.R
+- `Figure S7` is produced in script `test_habitatSharing.R`
 - `Figure S9` is produced in script `15-testHTTexcess.R`
 - `Supplemental Dataset S3` is produced in script `12-HTTeventCount.R`
 - `Supplemental Dataset S4` is produced in script `11-hitGroupEvaluation.R`
